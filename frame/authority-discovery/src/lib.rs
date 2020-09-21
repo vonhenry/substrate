@@ -24,26 +24,46 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use sp_std::{collections::btree_set::BTreeSet, prelude::*};
-use frame_support::{decl_module, decl_storage};
+use frame_support::{StorageValue};
 use sp_authority_discovery::AuthorityId;
 
-/// The module's config trait.
-pub trait Trait: frame_system::Trait + pallet_session::Trait {}
+pub use pallet::*;
+#[frame_support::pallet(AuthorityDiscovery)]
+mod pallet {
+	use super::*;
+	use frame_support::pallet_prelude::*;
+	use frame_system::pallet_prelude::*;
 
-decl_storage! {
-	trait Store for Module<T: Trait> as AuthorityDiscovery {
-		/// Keys of the current and next authority set.
-		Keys get(fn keys): Vec<AuthorityId>;
-	}
-	add_extra_genesis {
-		config(keys): Vec<AuthorityId>;
-		build(|config| Module::<T>::initialize_keys(&config.keys))
-	}
-}
+	/// The module's config trait.
+	#[pallet::trait_]
+	pub trait Trait: frame_system::Trait + pallet_session::Trait {}
 
-decl_module! {
-	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
+	/// Keys of the current and next authority set.
+	#[pallet::storage]
+	#[pallet::generate_getter(fn keys)]
+	pub(super) type Keys = StorageValueType<_, Vec<AuthorityId>, ValueQuery>;
+
+	#[pallet::genesis_config]
+	#[derive(Default)]
+	pub struct GenesisConfig {
+		pub keys: Vec<AuthorityId>
 	}
+
+	#[pallet::genesis_build]
+	impl<T: Trait> GenesisBuild<T> for GenesisConfig {
+		fn build(&self) {
+			Module::<T>::initialize_keys(&self.keys)
+		}
+	}
+
+	#[pallet::module]
+	pub struct Module<T>(PhantomData<T>);
+
+	#[pallet::module_interface]
+	impl<T: Trait> ModuleInterface<BlockNumberFor<T>> for Module<T> {}
+
+	#[pallet::call]
+	impl<T: Trait> Module<T> {}
 }
 
 impl<T: Trait> Module<T> {
