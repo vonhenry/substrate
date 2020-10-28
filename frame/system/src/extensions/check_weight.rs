@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Trait, Module};
+use crate::{Config, Pallet};
 use codec::{Encode, Decode};
 use sp_runtime::{
 	traits::{SignedExtension, DispatchInfoOf, Dispatchable, PostDispatchInfoOf, Printable},
@@ -28,14 +28,13 @@ use sp_runtime::{
 use frame_support::{
 	traits::{Get},
 	weights::{PostDispatchInfo, DispatchInfo, DispatchClass, priority::FrameTransactionPriority},
-	StorageValue,
 };
 
 /// Block resource (weight) limit check.
 #[derive(Encode, Decode, Clone, Eq, PartialEq, Default)]
-pub struct CheckWeight<T: Trait + Send + Sync>(sp_std::marker::PhantomData<T>);
+pub struct CheckWeight<T: Config + Send + Sync>(sp_std::marker::PhantomData<T>);
 
-impl<T: Trait + Send + Sync> CheckWeight<T> where
+impl<T: Config + Send + Sync> CheckWeight<T> where
 	T::Call: Dispatchable<Info=DispatchInfo, PostInfo=PostDispatchInfo>
 {
 	/// Get the quota ratio of each dispatch class type. This indicates that all operational and mandatory
@@ -92,7 +91,7 @@ impl<T: Trait + Send + Sync> CheckWeight<T> where
 		info: &DispatchInfoOf<T::Call>,
 	) -> Result<crate::weights::ExtrinsicsWeight, TransactionValidityError> {
 		let maximum_weight = T::MaximumBlockWeight::get();
-		let mut all_weight = Module::<T>::block_weight();
+		let mut all_weight = Pallet::<T>::block_weight();
 		match info.class {
 			// If we have a dispatch that must be included in the block, it ignores all the limits.
 			DispatchClass::Mandatory => {
@@ -144,7 +143,7 @@ impl<T: Trait + Send + Sync> CheckWeight<T> where
 		info: &DispatchInfoOf<T::Call>,
 		len: usize,
 	) -> Result<u32, TransactionValidityError> {
-		let current_len = Module::<T>::all_extrinsics_len();
+		let current_len = Pallet::<T>::all_extrinsics_len();
 		let maximum_len = T::MaximumBlockLength::get();
 		let limit = Self::get_dispatch_limit_ratio(info.class) * maximum_len;
 		let added_len = len as u32;
@@ -190,8 +189,8 @@ impl<T: Trait + Send + Sync> CheckWeight<T> where
 		let next_weight = Self::check_block_weight(info)?;
 		Self::check_extrinsic_weight(info)?;
 
-		crate::AllExtrinsicsLen::put(next_len);
-		crate::BlockWeight::put(next_weight);
+		crate::AllExtrinsicsLen::<T>::put(next_len);
+		crate::BlockWeight::<T>::put(next_weight);
 		Ok(())
 	}
 
@@ -213,7 +212,7 @@ impl<T: Trait + Send + Sync> CheckWeight<T> where
 	}
 }
 
-impl<T: Trait + Send + Sync> SignedExtension for CheckWeight<T> where
+impl<T: Config + Send + Sync> SignedExtension for CheckWeight<T> where
 	T::Call: Dispatchable<Info=DispatchInfo, PostInfo=PostDispatchInfo>
 {
 	type AccountId = T::AccountId;
@@ -285,7 +284,7 @@ impl<T: Trait + Send + Sync> SignedExtension for CheckWeight<T> where
 
 		let unspent = post_info.calc_unspent(info);
 		if unspent > 0 {
-			crate::BlockWeight::mutate(|current_weight| {
+			crate::BlockWeight::<T>::mutate(|current_weight| {
 				current_weight.sub(unspent, info.class);
 			})
 		}
@@ -294,7 +293,7 @@ impl<T: Trait + Send + Sync> SignedExtension for CheckWeight<T> where
 	}
 }
 
-impl<T: Trait + Send + Sync> sp_std::fmt::Debug for CheckWeight<T> {
+impl<T: Config + Send + Sync> sp_std::fmt::Debug for CheckWeight<T> {
 	#[cfg(feature = "std")]
 	fn fmt(&self, f: &mut sp_std::fmt::Formatter) -> sp_std::fmt::Result {
 		write!(f, "CheckWeight")
@@ -309,7 +308,7 @@ impl<T: Trait + Send + Sync> sp_std::fmt::Debug for CheckWeight<T> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{BlockWeight, AllExtrinsicsLen, Config};
+	use crate::{BlockWeight, AllExtrinsicsLen};
 	use crate::mock::{Test, CALL, new_test_ext, System};
 	use sp_std::marker::PhantomData;
 	use frame_support::{assert_ok, assert_noop};
@@ -485,7 +484,7 @@ mod tests {
 			let normal_limit = normal_weight_limit();
 
 			// given almost full block
-			BlockWeight::mutate(|current_weight| {
+			BlockWeight::<Test>::mutate(|current_weight| {
 				current_weight.put(normal_limit, DispatchClass::Normal)
 			});
 			// will not fit.
@@ -495,7 +494,7 @@ mod tests {
 
 			// likewise for length limit.
 			let len = 100_usize;
-			AllExtrinsicsLen::put(normal_length_limit());
+			AllExtrinsicsLen::<Test>::put(normal_length_limit());
 			assert!(CheckWeight::<Test>(PhantomData).pre_dispatch(&1, CALL, &normal, len).is_err());
 			assert!(CheckWeight::<Test>(PhantomData).pre_dispatch(&1, CALL, &op, len).is_ok());
 		})
@@ -528,7 +527,7 @@ mod tests {
 			let normal = DispatchInfo::default();
 			let normal_limit = normal_weight_limit() as usize;
 			let reset_check_weight = |tx, s, f| {
-				AllExtrinsicsLen::put(0);
+				AllExtrinsicsLen::<Test>::put(0);
 				let r = CheckWeight::<Test>(PhantomData).pre_dispatch(&1, CALL, tx, s);
 				if f { assert!(r.is_err()) } else { assert!(r.is_ok()) }
 			};
@@ -563,7 +562,7 @@ mod tests {
 			let len = 0_usize;
 
 			let reset_check_weight = |i, f, s| {
-				BlockWeight::mutate(|current_weight| {
+				BlockWeight::<Test>::mutate(|current_weight| {
 					current_weight.put(s, DispatchClass::Normal)
 				});
 				let r = CheckWeight::<Test>(PhantomData).pre_dispatch(&1, CALL, i, len);
@@ -588,19 +587,19 @@ mod tests {
 			let len = 0_usize;
 
 			// We allow 75% for normal transaction, so we put 25% - extrinsic base weight
-			BlockWeight::mutate(|current_weight| {
+			BlockWeight::<Test>::mutate(|current_weight| {
 				current_weight.put(256 - <Test as Config>::ExtrinsicBaseWeight::get(), DispatchClass::Normal)
 			});
 
 			let pre = CheckWeight::<Test>(PhantomData).pre_dispatch(&1, CALL, &info, len).unwrap();
-			assert_eq!(BlockWeight::get().total(), info.weight + 256);
+			assert_eq!(BlockWeight::<Test>::get().total(), info.weight + 256);
 
 			assert!(
 				CheckWeight::<Test>::post_dispatch(pre, &info, &post_info, len, &Ok(()))
 				.is_ok()
 			);
 			assert_eq!(
-				BlockWeight::get().total(),
+				BlockWeight::<Test>::get().total(),
 				post_info.actual_weight.unwrap() + 256,
 			);
 		})
@@ -616,13 +615,13 @@ mod tests {
 			};
 			let len = 0_usize;
 
-			BlockWeight::mutate(|current_weight| {
+			BlockWeight::<Test>::mutate(|current_weight| {
 				current_weight.put(128, DispatchClass::Normal)
 			});
 
 			let pre = CheckWeight::<Test>(PhantomData).pre_dispatch(&1, CALL, &info, len).unwrap();
 			assert_eq!(
-				BlockWeight::get().total(),
+				BlockWeight::<Test>::get().total(),
 				info.weight + 128 + <Test as Config>::ExtrinsicBaseWeight::get(),
 			);
 
@@ -631,7 +630,7 @@ mod tests {
 				.is_ok()
 			);
 			assert_eq!(
-				BlockWeight::get().total(),
+				BlockWeight::<Test>::get().total(),
 				info.weight + 128 + <Test as Config>::ExtrinsicBaseWeight::get(),
 			);
 		})

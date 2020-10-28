@@ -63,7 +63,7 @@ use sp_std::convert::{TryInto, TryFrom};
 use sp_std::prelude::{Box, Vec};
 use sp_runtime::app_crypto::RuntimeAppPublic;
 use sp_runtime::traits::{Extrinsic as ExtrinsicT, IdentifyAccount, One};
-use frame_support::{debug, storage::StorageMap, RuntimeDebug};
+use frame_support::{debug, RuntimeDebug};
 
 /// Marker struct used to flag using all supported keys to sign a payload.
 pub struct ForAll {}
@@ -448,7 +448,7 @@ pub trait AppCrypto<Public, Signature> {
 ///
 ///	TODO [#5663] Could this be just `T::Signature as traits::Verify>::Signer`?
 /// Seems that this may cause issues with bounds resolution.
-pub trait SigningTypes: crate::Trait {
+pub trait SigningTypes: crate::Config {
 	/// A public key that is capable of identifing `AccountId`s.
 	///
 	/// Usually that's either a raw crypto public key (e.g. `sr25519::Public`) or

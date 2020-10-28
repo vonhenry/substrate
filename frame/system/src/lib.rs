@@ -15,17 +15,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # System Module
+//! # System Pallet
 //!
 //! The System module provides low-level access to core types and cross-cutting utilities.
 //! It acts as the base layer for other pallets to interact with the Substrate framework components.
 //!
-//! - [`system::Trait`](./trait.Trait.html)
+//! - [`system::Config`](./trait.Config.html)
 //!
 //! ## Overview
 //!
 //! The System module defines the core data types used in a Substrate runtime.
-//! It also provides several utility functions (see [`Module`](./struct.Module.html)) for other FRAME pallets.
+//! It also provides several utility functions (see [`Pallet`](./struct.Pallet.html)) for other FRAME pallets.
 //!
 //! In addition, it manages the storage items for extrinsics data, indexes, event records, and digest items,
 //! among other things that support the execution of the current block.
@@ -41,7 +41,7 @@
 //!
 //! ### Public Functions
 //!
-//! See the [`Module`](./struct.Module.html) struct for details of publicly available functions.
+//! See the [`Pallet`](./struct.Pallet.html) struct for details of publicly available functions.
 //!
 //! ### Signed Extensions
 //!
@@ -74,15 +74,15 @@
 //! use frame_support::{decl_module, dispatch};
 //! use frame_system::{self as system, ensure_signed};
 //!
-//! pub trait Trait: system::Trait {}
+//! pub trait Trait: system::Config {}
 //!
 //! decl_module! {
 //! 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 //! 		#[weight = 0]
 //! 		pub fn system_module_example(origin) -> dispatch::DispatchResult {
 //! 			let _sender = ensure_signed(origin)?;
-//! 			let _extrinsic_count = <system::Module<T>>::extrinsic_count();
-//! 			let _parent_hash = <system::Module<T>>::parent_hash();
+//! 			let _extrinsic_count = <system::Pallet<T>>::extrinsic_count();
+//! 			let _parent_hash = <system::Pallet<T>>::parent_hash();
 //! 			Ok(())
 //! 		}
 //! 	}
@@ -106,7 +106,7 @@ use sp_runtime::{
 	traits::{
 		self, CheckEqual, AtLeast32Bit, Zero, Lookup, LookupError,
 		SimpleBitOps, Hash, Member, MaybeDisplay, BadOrigin,
-		MaybeSerialize, MaybeSerializeDeserialize, MaybeMallocSizeOf, StaticLookup, One, Bounded,
+		MaybeSerialize, MaybeMallocSizeOf, StaticLookup, One, Bounded,
 		Dispatchable, AtLeast32BitUnsigned
 	},
 	offchain::storage_lock::BlockNumberProvider,
@@ -114,8 +114,7 @@ use sp_runtime::{
 
 use sp_core::{ChangesTrieConfiguration, storage::well_known_keys};
 use frame_support::{
-	decl_module, decl_event, decl_storage, decl_error, Parameter, ensure, debug,
-	storage,
+	Parameter, ensure, debug, storage,
 	traits::{
 		Contains, Get, PalletInfo, OnNewAccount, OnKilledAccount, IsDeadAccount, Happened,
 		StoredMap, EnsureOrigin, OriginTrait, Filter,
@@ -169,126 +168,535 @@ pub trait WeightInfo {
 	fn suicide() -> Weight;
 }
 
-/// Kind of alias for `Config` trait. Deprecated as `Trait` is renamed `Config`.
-pub trait Trait: Config {}
-impl<T: Config> Trait for T {}
-
-/// System configuration trait. Implemented by runtime.
-pub trait Config: 'static + Eq + Clone {
-	/// The basic call filter to use in Origin. All origins are built with this filter as base,
-	/// except Root.
-	type BaseCallFilter: Filter<Self::Call>;
-
-	/// The `Origin` type used by dispatchable calls.
-	type Origin:
-		Into<Result<RawOrigin<Self::AccountId>, Self::Origin>>
-		+ From<RawOrigin<Self::AccountId>>
-		+ Clone
-		+ OriginTrait<Call = Self::Call>;
-
-	/// The aggregated `Call` type.
-	type Call: Dispatchable + Debug;
-
-	/// Account index (aka nonce) type. This stores the number of previous transactions associated
-	/// with a sender account.
-	type Index:
-		Parameter + Member + MaybeSerialize + Debug + Default + MaybeDisplay + AtLeast32Bit
-		+ Copy;
-
-	/// The block number type used by the runtime.
-	type BlockNumber:
-		Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay +
-		AtLeast32BitUnsigned + Default + Bounded + Copy + sp_std::hash::Hash +
-		sp_std::str::FromStr + MaybeMallocSizeOf;
-
-	/// The output of the `Hashing` function.
-	type Hash:
-		Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay + SimpleBitOps + Ord
-		+ Default + Copy + CheckEqual + sp_std::hash::Hash + AsRef<[u8]> + AsMut<[u8]> + MaybeMallocSizeOf;
-
-	/// The hashing system (algorithm) being used in the runtime (e.g. Blake2).
-	type Hashing: Hash<Output = Self::Hash>;
-
-	/// The user account identifier type for the runtime.
-	type AccountId: Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay + Ord
-		+ Default;
-
-	/// Converting trait to take a source type and convert to `AccountId`.
-	///
-	/// Used to define the type and conversion mechanism for referencing accounts in transactions.
-	/// It's perfectly reasonable for this to be an identity conversion (with the source type being
-	/// `AccountId`), but other modules (e.g. Indices module) may provide more functional/efficient
-	/// alternatives.
-	type Lookup: StaticLookup<Target = Self::AccountId>;
-
-	/// The block header.
-	type Header: Parameter + traits::Header<
-		Number = Self::BlockNumber,
-		Hash = Self::Hash,
-	>;
-
-	/// The aggregated event type of the runtime.
-	type Event: Parameter + Member + From<Event<Self>> + Debug;
-
-	/// Maximum number of block number to block hash mappings to keep (oldest pruned first).
-	type BlockHashCount: Get<Self::BlockNumber>;
-
-	/// The maximum weight of a block.
-	type MaximumBlockWeight: Get<Weight>;
-
-	/// The weight of runtime database operations the runtime can invoke.
-	type DbWeight: Get<RuntimeDbWeight>;
-
-	/// The base weight of executing a block, independent of the transactions in the block.
-	type BlockExecutionWeight: Get<Weight>;
-
-	/// The base weight of an Extrinsic in the block, independent of the of extrinsic being executed.
-	type ExtrinsicBaseWeight: Get<Weight>;
-
-	/// The maximal weight of a single Extrinsic. This should be set to at most
-	/// `MaximumBlockWeight - AverageOnInitializeWeight`. The limit only applies to extrinsics
-	/// containing `Normal` dispatch class calls.
-	type MaximumExtrinsicWeight: Get<Weight>;
-
-	/// The maximum length of a block (in bytes).
-	type MaximumBlockLength: Get<u32>;
-
-	/// The portion of the block that is available to normal transaction. The rest can only be used
-	/// by operational transactions. This can be applied to any resource limit managed by the system
-	/// module, including weight and length.
-	type AvailableBlockRatio: Get<Perbill>;
-
-	/// Get the chain's current version.
-	type Version: Get<RuntimeVersion>;
-
-	/// Provides information about the pallet setup in the runtime.
-	///
-	/// Expects the `PalletInfo` type that is being generated by `construct_runtime!` in the
-	/// runtime.
-	///
-	/// For tests it is okay to use `()` as type, however it will provide "useless" data.
-	type PalletInfo: PalletInfo;
-
-	/// Data to be associated with an account (other than nonce/transaction counter, which this
-	/// module does regardless).
-	type AccountData: Member + FullCodec + Clone + Default;
-
-	/// Handler for when a new account has just been created.
-	type OnNewAccount: OnNewAccount<Self::AccountId>;
-
-	/// A function that is invoked when an account has been determined to be dead.
-	///
-	/// All resources should be cleaned up associated with the given account.
-	type OnKilledAccount: OnKilledAccount<Self::AccountId>;
-
-	type SystemWeightInfo: WeightInfo;
-}
-
 pub type DigestOf<T> = generic::Digest<<T as Config>::Hash>;
 pub type DigestItemOf<T> = generic::DigestItem<<T as Config>::Hash>;
 
 pub type Key = Vec<u8>;
 pub type KeyValue = (Vec<u8>, Vec<u8>);
+
+pub use pallet::*;
+
+/// Temporary type to avoid breaking other pallet
+#[doc(hidden)]
+pub type RawEvent<T> = Event<T>;
+
+#[frame_support::pallet]
+mod pallet {
+	use crate as frame_system;
+	use frame_support::pallet_prelude::*;
+	use crate::pallet_prelude::*;
+	use super::*;
+
+	/// Temporary keep old name Module, soon to be deprecated alongside old macro.
+	pub type Module<T> = Pallet<T>;
+
+	/// Temporary keep old name Trait, soon to be deprecated alongside old macro.
+	pub trait Trait: Config {}
+	impl<Runtime: Config> Trait for Runtime {}
+
+	#[pallet::pallet]
+	pub struct Pallet<T>(PhantomData<T>);
+
+	#[pallet::interface]
+	impl<T: Config> Interface<BlockNumberFor<T>> for Pallet<T> {
+		fn on_runtime_upgrade() -> Weight {
+			if !<UpgradedToU32RefCount<T>>::get() {
+				Account::<T>::translate::<(T::Index, u8, T::AccountData), _>(|_key, (nonce, rc, data)|
+					Some(AccountInfo { nonce, refcount: rc as RefCount, data })
+				);
+				<UpgradedToU32RefCount<T>>::put(true);
+				T::MaximumBlockWeight::get()
+			} else {
+				0
+			}
+		}
+	}
+
+	#[pallet::config]
+	#[pallet::disable_frame_system_supertrait_check]
+	pub trait Config: 'static + Eq + Clone {
+		/// The basic call filter to use in Origin. All origins are built with this filter as base,
+		/// except Root.
+		type BaseCallFilter: Filter<Self::Call>;
+
+		/// The `Origin` type used by dispatchable calls.
+		type Origin:
+			Into<Result<RawOrigin<Self::AccountId>, Self::Origin>>
+			+ From<RawOrigin<Self::AccountId>>
+			+ Clone
+			+ OriginTrait<Call = Self::Call>;
+
+		/// The aggregated `Call` type.
+		type Call: Dispatchable + Debug;
+
+		/// Account index (aka nonce) type. This stores the number of previous transactions associated
+		/// with a sender account.
+		type Index:
+			Parameter + Member + MaybeSerialize + Debug + Default + MaybeDisplay + AtLeast32Bit
+			+ Copy;
+
+		/// The block number type used by the runtime.
+		type BlockNumber:
+			Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay +
+			AtLeast32BitUnsigned + Default + Bounded + Copy + sp_std::hash::Hash +
+			sp_std::str::FromStr + MaybeMallocSizeOf;
+
+		/// The output of the `Hashing` function.
+		type Hash:
+			Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay + SimpleBitOps
+			+ Ord + Default + Copy + CheckEqual + sp_std::hash::Hash + AsRef<[u8]> + AsMut<[u8]>
+			+ MaybeMallocSizeOf;
+
+		/// The hashing system (algorithm) being used in the runtime (e.g. Blake2).
+		type Hashing: Hash<Output = Self::Hash>;
+
+		/// The user account identifier type for the runtime.
+		type AccountId: Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay + Ord
+			+ Default;
+
+		/// Converting trait to take a source type and convert to `AccountId`.
+		///
+		/// Used to define the type and conversion mechanism for referencing accounts in transactions.
+		/// It's perfectly reasonable for this to be an identity conversion (with the source type being
+		/// `AccountId`), but other modules (e.g. Indices module) may provide more functional/efficient
+		/// alternatives.
+		type Lookup: StaticLookup<Target = Self::AccountId>;
+
+		/// The block header.
+		type Header: Parameter + traits::Header<
+			Number = Self::BlockNumber,
+			Hash = Self::Hash,
+		>;
+
+		/// The aggregated event type of the runtime.
+		type Event: Parameter + Member + From<Event<Self>> + Debug
+			+ IsType<<Self as frame_system::Config>::Event>;
+
+		/// Maximum number of block number to block hash mappings to keep (oldest pruned first).
+		#[pallet::constant]
+		type BlockHashCount: Get<Self::BlockNumber>;
+
+		/// The maximum weight of a block.
+		#[pallet::constant]
+		type MaximumBlockWeight: Get<Weight>;
+
+		/// The weight of runtime database operations the runtime can invoke.
+		#[pallet::constant]
+		type DbWeight: Get<RuntimeDbWeight>;
+
+		/// The base weight of executing a block, independent of the transactions in the block.
+		#[pallet::constant]
+		type BlockExecutionWeight: Get<Weight>;
+
+		/// The base weight of an Extrinsic in the block, independent of the of extrinsic being executed.
+		#[pallet::constant]
+		type ExtrinsicBaseWeight: Get<Weight>;
+
+		/// The maximal weight of a single Extrinsic. This should be set to at most
+		/// `MaximumBlockWeight - AverageOnInitializeWeight`. The limit only applies to extrinsics
+		/// containing `Normal` dispatch class calls.
+		type MaximumExtrinsicWeight: Get<Weight>;
+
+		/// The maximum length of a block (in bytes).
+		#[pallet::constant]
+		type MaximumBlockLength: Get<u32>;
+
+		/// The portion of the block that is available to normal transaction. The rest can only be used
+		/// by operational transactions. This can be applied to any resource limit managed by the system
+		/// module, including weight and length.
+		type AvailableBlockRatio: Get<Perbill>;
+
+		/// Get the chain's current version.
+		type Version: Get<RuntimeVersion>;
+
+		/// Provides information about the pallet setup in the runtime.
+		/// Expects the `PalletInfo` type that is being generated by `construct_runtime!` in the
+		/// runtime.
+		///
+		/// For tests it is okay to use `()` as type, however it will provide "useless" data.
+		type PalletInfo: PalletInfo;
+
+		/// Data to be associated with an account (other than nonce/transaction counter, which this
+		/// module does regardless).
+		type AccountData: Member + FullCodec + Clone + Default;
+
+		/// Handler for when a new account has just been created.
+		type OnNewAccount: OnNewAccount<Self::AccountId>;
+
+		/// A function that is invoked when an account has been determined to be dead.
+		///
+		/// All resources should be cleaned up associated with the given account.
+		type OnKilledAccount: OnKilledAccount<Self::AccountId>;
+
+		type SystemWeightInfo: WeightInfo;
+	}
+
+	/// Exposed trait-generic origin type.
+	#[pallet::origin]
+	pub type Origin<T> = RawOrigin<<T as Config>::AccountId>;
+
+	/// The full account information for a particular account ID.
+	#[pallet::storage]
+	#[pallet::getter(fn account)]
+	pub type Account<T: Config> = StorageMap<
+		_, Blake2_128Concat, T::AccountId, AccountInfo<T::Index, T::AccountData>, ValueQuery
+	>;
+
+	/// Total extrinsics count for the current block.
+	#[pallet::storage]
+	pub(crate) type ExtrinsicCount<T> = StorageValue<_, u32>;
+
+	/// The current weight for the block.
+	#[pallet::storage]
+	#[pallet::getter(fn block_weight)]
+	pub(crate) type BlockWeight<T> = StorageValue<_, weights::ExtrinsicsWeight, ValueQuery>;
+
+	/// Total length (in bytes) for all extrinsics put together, for the current block.
+	#[pallet::storage]
+	pub(crate) type AllExtrinsicsLen<T> = StorageValue<_, u32>;
+
+	/// Map of block numbers to block hashes.
+	#[pallet::storage]
+	#[pallet::getter(fn block_hash)]
+	pub type BlockHash<T: Config> =
+		StorageMap<_, Twox64Concat, T::BlockNumber, T::Hash, ValueQuery>;
+
+		/// Extrinsics data for the current block (maps an extrinsic's index to its data).
+	#[pallet::storage]
+	#[pallet::getter(fn extrinsic_data)]
+	pub(crate) type ExtrinsicData<T> = StorageMap<_, Twox64Concat, u32, Vec<u8>, ValueQuery>;
+
+	/// The current block number being processed. Set by `execute_block`.
+	#[pallet::storage]
+	#[pallet::getter(fn block_number)]
+	pub(crate) type Number<T: Config> = StorageValue<_, T::BlockNumber, ValueQuery>;
+
+	/// Hash of the previous block.
+	#[pallet::storage]
+	#[pallet::getter(fn parent_hash)]
+	pub(crate) type ParentHash<T: Config> = StorageValue<_, T::Hash, ValueQuery>;
+
+	/// Extrinsics root of the current block, also part of the block header.
+	#[pallet::storage]
+	#[pallet::getter(fn extrinsics_root)]
+	pub(crate) type ExtrinsicsRoot<T: Config> = StorageValue<_, T::Hash, ValueQuery>;
+
+	/// Digest of the current block, also part of the block header.
+	#[pallet::storage]
+	#[pallet::getter(fn digest)]
+	pub(crate) type Digest<T: Config> = StorageValue<_, DigestOf<T>, ValueQuery>;
+
+	/// Events deposited for the current block.
+	#[pallet::storage]
+	#[pallet::getter(fn events)]
+	pub(crate) type Events<T: Config> =
+		StorageValue<_, Vec<EventRecord<T::Event, T::Hash>>, ValueQuery>;
+
+	/// The number of events in the `Events<T>` list.
+	#[pallet::storage]
+	#[pallet::getter(fn event_count)]
+	pub(crate) type EventCount<T> = StorageValue<_, EventIndex, ValueQuery>;
+
+	// TODO: https://github.com/paritytech/substrate/issues/2553
+	// Possibly, we can improve it by using something like:
+	// `Option<(BlockNumber, Vec<EventIndex>)>`, however in this case we won't be able to use
+	// `EventTopics::append`.
+
+	/// Mapping between a topic (represented by T::Hash) and a vector of indexes
+	/// of events in the `<Events<T>>` list.
+	///
+	/// All topic vectors have deterministic storage locations depending on the topic. This
+	/// allows light-clients to leverage the changes trie storage tracking mechanism and
+	/// in case of changes fetch the list of events of interest.
+	///
+	/// The value has the type `(T::BlockNumber, EventIndex)` because if we used only just
+	/// the `EventIndex` then in case if the topic has the same contents on the next block
+	/// no notification will be triggered thus the event might be lost.
+	#[pallet::storage]
+	#[pallet::getter(fn event_topics)]
+	pub(crate) type EventTopics<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::Hash, Vec<(T::BlockNumber, EventIndex)>, ValueQuery>;
+
+	/// Stores the `spec_version` and `spec_name` of when the last runtime upgrade happened.
+	#[pallet::storage]
+	pub type LastRuntimeUpgrade<T> = StorageValue<_, LastRuntimeUpgradeInfo>;
+
+	/// True if we have upgraded so that `type RefCount` is `u32`. False (default) if not.
+	#[pallet::storage]
+	type UpgradedToU32RefCount<T> = StorageValue<_, bool, ValueQuery>;
+
+	/// The execution phase of the block.
+	#[pallet::storage]
+	pub(crate) type ExecutionPhase<T> = StorageValue<_, Phase>;
+
+	#[pallet::genesis_config]
+	#[derive(Default)]
+	pub struct GenesisConfig {
+		pub changes_trie_config: Option<ChangesTrieConfiguration>,
+		#[serde(with = "sp_core::bytes")]
+		pub code: Vec<u8>,
+	}
+
+	#[cfg(feature = "std")]
+	impl GenesisConfig {
+		/// Helper method to call `GenesisBuild::<T>::build_storage`.
+		pub fn build_storage<T: Config>(self) -> Result<sp_runtime::Storage, String> {
+			GenesisBuild::<T>::build_storage(&self)
+		}
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> GenesisBuild<T> for GenesisConfig {
+		fn build(&self) {
+			use codec::Encode;
+
+			sp_io::storage::set(well_known_keys::CODE, &self.code);
+			sp_io::storage::set(well_known_keys::EXTRINSIC_INDEX, &0u32.encode());
+
+			if let Some(ref changes_trie_config) = self.changes_trie_config {
+				sp_io::storage::set(
+					well_known_keys::CHANGES_TRIE_CONFIG,
+					&changes_trie_config.encode(),
+				);
+			}
+
+			<BlockHash<T>>::insert::<_, T::Hash>(T::BlockNumber::zero(), hash69());
+			<ParentHash<T>>::put::<T::Hash>(hash69());
+			<LastRuntimeUpgrade<T>>::put(LastRuntimeUpgradeInfo::from(T::Version::get()));
+			<UpgradedToU32RefCount<T>>::put(true);
+		}
+	}
+
+	/// Event for the System module.
+	#[pallet::event]
+	#[pallet::metadata(<T as Config>::AccountId = AccountId)]
+	pub enum Event<T: Config> {
+		/// An extrinsic completed successfully. \[info\]
+		ExtrinsicSuccess(DispatchInfo),
+		/// An extrinsic failed. \[error, info\]
+		ExtrinsicFailed(DispatchError, DispatchInfo),
+		/// `:code` was updated.
+		CodeUpdated,
+		/// A new \[account\] was created.
+		NewAccount(<T as Config>::AccountId),
+		/// An \[account\] was reaped.
+		KilledAccount(<T as Config>::AccountId),
+	}
+
+	/// Error for the System module
+	#[pallet::error]
+	pub enum Error<T> {
+		/// The name of specification does not match between the current runtime
+		/// and the new runtime.
+		InvalidSpecName,
+		/// The specification version is not allowed to decrease between the current runtime
+		/// and the new runtime.
+		SpecVersionNeedsToIncrease,
+		/// Failed to extract the runtime version from the new runtime.
+		///
+		/// Either calling `Core_version` or decoding `RuntimeVersion` failed.
+		FailedToExtractRuntimeVersion,
+		/// Suicide called when the account has non-default composite data.
+		NonDefaultComposite,
+		/// There is a non-zero reference count preventing the account from being purged.
+		NonZeroRefCount,
+	}
+
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {
+		/// A dispatch that will fill the block weight up to the given ratio.
+		// TODO: This should only be available for testing, rather than in general usage, but
+		// that's not possible at present (since it's within the decl_module macro).
+		#[pallet::weight(*_ratio * T::MaximumBlockWeight::get())]
+		fn fill_block(origin: OriginFor<T>, _ratio: Perbill) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			Ok(().into())
+		}
+
+		/// Make some on-chain remark.
+		///
+		/// # <weight>
+		/// - `O(1)`
+		/// - Base Weight: 0.665 µs, independent of remark length.
+		/// - No DB operations.
+		/// # </weight>
+		#[pallet::weight(T::SystemWeightInfo::remark(_remark.len() as u32))]
+		fn remark(origin: OriginFor<T>, _remark: Vec<u8>) -> DispatchResultWithPostInfo {
+			ensure_signed(origin)?;
+			Ok(().into())
+		}
+
+		/// Set the number of pages in the WebAssembly environment's heap.
+		///
+		/// # <weight>
+		/// - `O(1)`
+		/// - 1 storage write.
+		/// - Base Weight: 1.405 µs
+		/// - 1 write to HEAP_PAGES
+		/// # </weight>
+		#[pallet::weight((T::SystemWeightInfo::set_heap_pages(), DispatchClass::Operational))]
+		fn set_heap_pages(origin: OriginFor<T>, pages: u64) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			storage::unhashed::put_raw(well_known_keys::HEAP_PAGES, &pages.encode());
+			Ok(().into())
+		}
+
+		/// Set the new runtime code.
+		///
+		/// # <weight>
+		/// - `O(C + S)` where `C` length of `code` and `S` complexity of `can_set_code`
+		/// - 1 storage write (codec `O(C)`).
+		/// - 1 call to `can_set_code`: `O(S)` (calls `sp_io::misc::runtime_version` which is expensive).
+		/// - 1 event.
+		/// The weight of this function is dependent on the runtime, but generally this is very expensive.
+		/// We will treat this as a full block.
+		/// # </weight>
+		#[pallet::weight((T::MaximumBlockWeight::get(), DispatchClass::Operational))]
+		pub fn set_code(origin: OriginFor<T>, code: Vec<u8>) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			Self::can_set_code(&code)?;
+
+			storage::unhashed::put_raw(well_known_keys::CODE, &code);
+			Self::deposit_event(Event::CodeUpdated);
+			Ok(().into())
+		}
+
+		/// Set the new runtime code without doing any checks of the given `code`.
+		///
+		/// # <weight>
+		/// - `O(C)` where `C` length of `code`
+		/// - 1 storage write (codec `O(C)`).
+		/// - 1 event.
+		/// The weight of this function is dependent on the runtime. We will treat this as a full block.
+		/// # </weight>
+		#[pallet::weight((T::MaximumBlockWeight::get(), DispatchClass::Operational))]
+		pub fn set_code_without_checks(
+			origin: OriginFor<T>,
+			code: Vec<u8>
+		) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			storage::unhashed::put_raw(well_known_keys::CODE, &code);
+			Self::deposit_event(Event::CodeUpdated);
+			Ok(().into())
+		}
+
+		/// Set the new changes trie configuration.
+		///
+		/// # <weight>
+		/// - `O(1)`
+		/// - 1 storage write or delete (codec `O(1)`).
+		/// - 1 call to `deposit_log`: Uses `append` API, so O(1)
+		/// - Base Weight: 7.218 µs
+		/// - DB Weight:
+		///     - Writes: Changes Trie, System Digest
+		/// # </weight>
+		#[pallet::weight((T::SystemWeightInfo::set_changes_trie_config(), DispatchClass::Operational))]
+		pub fn set_changes_trie_config(
+			origin: OriginFor<T>,
+			changes_trie_config: Option<ChangesTrieConfiguration>
+		) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			match changes_trie_config.clone() {
+				Some(changes_trie_config) => storage::unhashed::put_raw(
+					well_known_keys::CHANGES_TRIE_CONFIG,
+					&changes_trie_config.encode(),
+				),
+				None => storage::unhashed::kill(well_known_keys::CHANGES_TRIE_CONFIG),
+			}
+
+			let log = generic::DigestItem::ChangesTrieSignal(
+				generic::ChangesTrieSignal::NewConfiguration(changes_trie_config),
+			);
+			Self::deposit_log(log.into());
+			Ok(().into())
+		}
+
+		/// Set some items of storage.
+		///
+		/// # <weight>
+		/// - `O(I)` where `I` length of `items`
+		/// - `I` storage writes (`O(1)`).
+		/// - Base Weight: 0.568 * i µs
+		/// - Writes: Number of items
+		/// # </weight>
+		#[pallet::weight((
+			T::SystemWeightInfo::set_storage(items.len() as u32),
+			DispatchClass::Operational,
+		))]
+		pub(crate) fn set_storage(origin: OriginFor<T>, items: Vec<KeyValue>) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			for i in &items {
+				storage::unhashed::put_raw(&i.0, &i.1);
+			}
+			Ok(().into())
+		}
+
+		/// Kill some items from storage.
+		///
+		/// # <weight>
+		/// - `O(IK)` where `I` length of `keys` and `K` length of one key
+		/// - `I` storage deletions.
+		/// - Base Weight: .378 * i µs
+		/// - Writes: Number of items
+		/// # </weight>
+		#[pallet::weight((
+			T::SystemWeightInfo::kill_storage(keys.len() as u32),
+			DispatchClass::Operational,
+		))]
+		fn kill_storage(origin: OriginFor<T>, keys: Vec<Key>) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			for key in &keys {
+				storage::unhashed::kill(&key);
+			}
+			Ok(().into())
+		}
+
+		/// Kill all storage items with a key that starts with the given prefix.
+		///
+		/// **NOTE:** We rely on the Root origin to provide us the number of subkeys under
+		/// the prefix we are removing to accurately calculate the weight of this function.
+		///
+		/// # <weight>
+		/// - `O(P)` where `P` amount of keys with prefix `prefix`
+		/// - `P` storage deletions.
+		/// - Base Weight: 0.834 * P µs
+		/// - Writes: Number of subkeys + 1
+		/// # </weight>
+		#[pallet::weight((
+			T::SystemWeightInfo::kill_prefix(_subkeys.saturating_add(1)),
+			DispatchClass::Operational,
+		))]
+		fn kill_prefix(
+			origin: OriginFor<T>,
+			prefix: Key,
+			_subkeys: u32
+		) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			storage::unhashed::kill_prefix(&prefix);
+			Ok(().into())
+		}
+
+		/// Kill the sending account, assuming there are no references outstanding and the composite
+		/// data is equal to its default value.
+		///
+		/// # <weight>
+		/// - `O(1)`
+		/// - 1 storage read and deletion.
+		/// --------------------
+		/// Base Weight: 8.626 µs
+		/// No DB Read or Write operations because caller is already in overlay
+		/// # </weight>
+		#[pallet::weight((T::SystemWeightInfo::suicide(), DispatchClass::Operational))]
+		pub fn suicide(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
+			let who = ensure_signed(origin)?;
+			let account = Account::<T>::get(&who);
+			ensure!(account.refcount == 0, Error::<T>::NonZeroRefCount);
+			ensure!(account.data == T::AccountData::default(), Error::<T>::NonDefaultComposite);
+			Self::kill_account(&who);
+			Ok(().into())
+		}
+	}
+}
 
 /// A phase of a block's execution.
 #[derive(Encode, Decode, RuntimeDebug)]
@@ -341,9 +749,6 @@ impl<AccountId> From<Option<AccountId>> for RawOrigin<AccountId> {
 		}
 	}
 }
-
-/// Exposed trait-generic origin type.
-pub type Origin<T> = RawOrigin<<T as Config>::AccountId>;
 
 // Create a Hash with 69 for each byte,
 // only used to build genesis config.
@@ -399,342 +804,6 @@ impl From<sp_version::RuntimeVersion> for LastRuntimeUpgradeInfo {
 		Self {
 			spec_version: version.spec_version.into(),
 			spec_name: version.spec_name,
-		}
-	}
-}
-
-decl_storage! {
-	trait Store for Module<T: Trait> as System {
-		/// The full account information for a particular account ID.
-		pub Account get(fn account):
-			map hasher(blake2_128_concat) T::AccountId => AccountInfo<T::Index, T::AccountData>;
-
-		/// Total extrinsics count for the current block.
-		ExtrinsicCount: Option<u32>;
-
-		/// The current weight for the block.
-		BlockWeight get(fn block_weight): weights::ExtrinsicsWeight;
-
-		/// Total length (in bytes) for all extrinsics put together, for the current block.
-		AllExtrinsicsLen: Option<u32>;
-
-		/// Map of block numbers to block hashes.
-		pub BlockHash get(fn block_hash) build(|_| vec![(T::BlockNumber::zero(), hash69())]):
-			map hasher(twox_64_concat) T::BlockNumber => T::Hash;
-
-		/// Extrinsics data for the current block (maps an extrinsic's index to its data).
-		ExtrinsicData get(fn extrinsic_data): map hasher(twox_64_concat) u32 => Vec<u8>;
-
-		/// The current block number being processed. Set by `execute_block`.
-		Number get(fn block_number): T::BlockNumber;
-
-		/// Hash of the previous block.
-		ParentHash get(fn parent_hash) build(|_| hash69()): T::Hash;
-
-		/// Extrinsics root of the current block, also part of the block header.
-		ExtrinsicsRoot get(fn extrinsics_root): T::Hash;
-
-		/// Digest of the current block, also part of the block header.
-		Digest get(fn digest): DigestOf<T>;
-
-		/// Events deposited for the current block.
-		Events get(fn events): Vec<EventRecord<T::Event, T::Hash>>;
-
-		/// The number of events in the `Events<T>` list.
-		EventCount get(fn event_count): EventIndex;
-
-		// TODO: https://github.com/paritytech/substrate/issues/2553
-		// Possibly, we can improve it by using something like:
-		// `Option<(BlockNumber, Vec<EventIndex>)>`, however in this case we won't be able to use
-		// `EventTopics::append`.
-
-		/// Mapping between a topic (represented by T::Hash) and a vector of indexes
-		/// of events in the `<Events<T>>` list.
-		///
-		/// All topic vectors have deterministic storage locations depending on the topic. This
-		/// allows light-clients to leverage the changes trie storage tracking mechanism and
-		/// in case of changes fetch the list of events of interest.
-		///
-		/// The value has the type `(T::BlockNumber, EventIndex)` because if we used only just
-		/// the `EventIndex` then in case if the topic has the same contents on the next block
-		/// no notification will be triggered thus the event might be lost.
-		EventTopics get(fn event_topics): map hasher(blake2_128_concat) T::Hash => Vec<(T::BlockNumber, EventIndex)>;
-
-		/// Stores the `spec_version` and `spec_name` of when the last runtime upgrade happened.
-		pub LastRuntimeUpgrade build(|_| Some(LastRuntimeUpgradeInfo::from(T::Version::get()))): Option<LastRuntimeUpgradeInfo>;
-
-		/// True if we have upgraded so that `type RefCount` is `u32`. False (default) if not.
-		UpgradedToU32RefCount build(|_| true): bool;
-
-		/// The execution phase of the block.
-		ExecutionPhase: Option<Phase>;
-	}
-	add_extra_genesis {
-		config(changes_trie_config): Option<ChangesTrieConfiguration>;
-		#[serde(with = "sp_core::bytes")]
-		config(code): Vec<u8>;
-
-		build(|config: &GenesisConfig| {
-			use codec::Encode;
-
-			sp_io::storage::set(well_known_keys::CODE, &config.code);
-			sp_io::storage::set(well_known_keys::EXTRINSIC_INDEX, &0u32.encode());
-
-			if let Some(ref changes_trie_config) = config.changes_trie_config {
-				sp_io::storage::set(
-					well_known_keys::CHANGES_TRIE_CONFIG,
-					&changes_trie_config.encode(),
-				);
-			}
-		});
-	}
-}
-
-decl_event!(
-	/// Event for the System module.
-	pub enum Event<T> where AccountId = <T as Config>::AccountId {
-		/// An extrinsic completed successfully. \[info\]
-		ExtrinsicSuccess(DispatchInfo),
-		/// An extrinsic failed. \[error, info\]
-		ExtrinsicFailed(DispatchError, DispatchInfo),
-		/// `:code` was updated.
-		CodeUpdated,
-		/// A new \[account\] was created.
-		NewAccount(AccountId),
-		/// An \[account\] was reaped.
-		KilledAccount(AccountId),
-	}
-);
-
-decl_error! {
-	/// Error for the System module
-	pub enum Error for Module<T: Trait> {
-		/// The name of specification does not match between the current runtime
-		/// and the new runtime.
-		InvalidSpecName,
-		/// The specification version is not allowed to decrease between the current runtime
-		/// and the new runtime.
-		SpecVersionNeedsToIncrease,
-		/// Failed to extract the runtime version from the new runtime.
-		///
-		/// Either calling `Core_version` or decoding `RuntimeVersion` failed.
-		FailedToExtractRuntimeVersion,
-		/// Suicide called when the account has non-default composite data.
-		NonDefaultComposite,
-		/// There is a non-zero reference count preventing the account from being purged.
-		NonZeroRefCount,
-	}
-}
-
-/// Pallet struct placeholder on which is implemented the pallet logic.
-///
-/// It is currently an alias for `Module` as old macros still generate/use old name.
-pub type Pallet<T> = Module<T>;
-
-decl_module! {
-	pub struct Module<T: Trait> for enum Call where origin: T::Origin, system=self {
-		type Error = Error<T>;
-
-		/// The maximum number of blocks to allow in mortal eras.
-		const BlockHashCount: T::BlockNumber = T::BlockHashCount::get();
-
-		/// The maximum weight of a block.
-		const MaximumBlockWeight: Weight = T::MaximumBlockWeight::get();
-
-		/// The weight of runtime database operations the runtime can invoke.
-		const DbWeight: RuntimeDbWeight = T::DbWeight::get();
-
-		/// The base weight of executing a block, independent of the transactions in the block.
-		const BlockExecutionWeight: Weight = T::BlockExecutionWeight::get();
-
-		/// The base weight of an Extrinsic in the block, independent of the of extrinsic being executed.
-		const ExtrinsicBaseWeight: Weight = T::ExtrinsicBaseWeight::get();
-
-		/// The maximum length of a block (in bytes).
-		const MaximumBlockLength: u32 = T::MaximumBlockLength::get();
-
-		fn on_runtime_upgrade() -> frame_support::weights::Weight {
-			if !UpgradedToU32RefCount::get() {
-				Account::<T>::translate::<(T::Index, u8, T::AccountData), _>(|_key, (nonce, rc, data)|
-					Some(AccountInfo { nonce, refcount: rc as RefCount, data })
-				);
-				UpgradedToU32RefCount::put(true);
-				T::MaximumBlockWeight::get()
-			} else {
-				0
-			}
-		}
-
-		/// A dispatch that will fill the block weight up to the given ratio.
-		// TODO: This should only be available for testing, rather than in general usage, but
-		// that's not possible at present (since it's within the decl_module macro).
-		#[weight = *_ratio * T::MaximumBlockWeight::get()]
-		fn fill_block(origin, _ratio: Perbill) {
-			ensure_root(origin)?;
-		}
-
-		/// Make some on-chain remark.
-		///
-		/// # <weight>
-		/// - `O(1)`
-		/// - Base Weight: 0.665 µs, independent of remark length.
-		/// - No DB operations.
-		/// # </weight>
-		#[weight = T::SystemWeightInfo::remark(_remark.len() as u32)]
-		fn remark(origin, _remark: Vec<u8>) {
-			ensure_signed(origin)?;
-		}
-
-		/// Set the number of pages in the WebAssembly environment's heap.
-		///
-		/// # <weight>
-		/// - `O(1)`
-		/// - 1 storage write.
-		/// - Base Weight: 1.405 µs
-		/// - 1 write to HEAP_PAGES
-		/// # </weight>
-		#[weight = (T::SystemWeightInfo::set_heap_pages(), DispatchClass::Operational)]
-		fn set_heap_pages(origin, pages: u64) {
-			ensure_root(origin)?;
-			storage::unhashed::put_raw(well_known_keys::HEAP_PAGES, &pages.encode());
-		}
-
-		/// Set the new runtime code.
-		///
-		/// # <weight>
-		/// - `O(C + S)` where `C` length of `code` and `S` complexity of `can_set_code`
-		/// - 1 storage write (codec `O(C)`).
-		/// - 1 call to `can_set_code`: `O(S)` (calls `sp_io::misc::runtime_version` which is expensive).
-		/// - 1 event.
-		/// The weight of this function is dependent on the runtime, but generally this is very expensive.
-		/// We will treat this as a full block.
-		/// # </weight>
-		#[weight = (T::MaximumBlockWeight::get(), DispatchClass::Operational)]
-		pub fn set_code(origin, code: Vec<u8>) {
-			ensure_root(origin)?;
-			Self::can_set_code(&code)?;
-
-			storage::unhashed::put_raw(well_known_keys::CODE, &code);
-			Self::deposit_event(RawEvent::CodeUpdated);
-		}
-
-		/// Set the new runtime code without doing any checks of the given `code`.
-		///
-		/// # <weight>
-		/// - `O(C)` where `C` length of `code`
-		/// - 1 storage write (codec `O(C)`).
-		/// - 1 event.
-		/// The weight of this function is dependent on the runtime. We will treat this as a full block.
-		/// # </weight>
-		#[weight = (T::MaximumBlockWeight::get(), DispatchClass::Operational)]
-		pub fn set_code_without_checks(origin, code: Vec<u8>) {
-			ensure_root(origin)?;
-			storage::unhashed::put_raw(well_known_keys::CODE, &code);
-			Self::deposit_event(RawEvent::CodeUpdated);
-		}
-
-		/// Set the new changes trie configuration.
-		///
-		/// # <weight>
-		/// - `O(1)`
-		/// - 1 storage write or delete (codec `O(1)`).
-		/// - 1 call to `deposit_log`: Uses `append` API, so O(1)
-		/// - Base Weight: 7.218 µs
-		/// - DB Weight:
-		///     - Writes: Changes Trie, System Digest
-		/// # </weight>
-		#[weight = (T::SystemWeightInfo::set_changes_trie_config(), DispatchClass::Operational)]
-		pub fn set_changes_trie_config(origin, changes_trie_config: Option<ChangesTrieConfiguration>) {
-			ensure_root(origin)?;
-			match changes_trie_config.clone() {
-				Some(changes_trie_config) => storage::unhashed::put_raw(
-					well_known_keys::CHANGES_TRIE_CONFIG,
-					&changes_trie_config.encode(),
-				),
-				None => storage::unhashed::kill(well_known_keys::CHANGES_TRIE_CONFIG),
-			}
-
-			let log = generic::DigestItem::ChangesTrieSignal(
-				generic::ChangesTrieSignal::NewConfiguration(changes_trie_config),
-			);
-			Self::deposit_log(log.into());
-		}
-
-		/// Set some items of storage.
-		///
-		/// # <weight>
-		/// - `O(I)` where `I` length of `items`
-		/// - `I` storage writes (`O(1)`).
-		/// - Base Weight: 0.568 * i µs
-		/// - Writes: Number of items
-		/// # </weight>
-		#[weight = (
-			T::SystemWeightInfo::set_storage(items.len() as u32),
-			DispatchClass::Operational,
-		)]
-		fn set_storage(origin, items: Vec<KeyValue>) {
-			ensure_root(origin)?;
-			for i in &items {
-				storage::unhashed::put_raw(&i.0, &i.1);
-			}
-		}
-
-		/// Kill some items from storage.
-		///
-		/// # <weight>
-		/// - `O(IK)` where `I` length of `keys` and `K` length of one key
-		/// - `I` storage deletions.
-		/// - Base Weight: .378 * i µs
-		/// - Writes: Number of items
-		/// # </weight>
-		#[weight = (
-			T::SystemWeightInfo::kill_storage(keys.len() as u32),
-			DispatchClass::Operational,
-		)]
-		fn kill_storage(origin, keys: Vec<Key>) {
-			ensure_root(origin)?;
-			for key in &keys {
-				storage::unhashed::kill(&key);
-			}
-		}
-
-		/// Kill all storage items with a key that starts with the given prefix.
-		///
-		/// **NOTE:** We rely on the Root origin to provide us the number of subkeys under
-		/// the prefix we are removing to accurately calculate the weight of this function.
-		///
-		/// # <weight>
-		/// - `O(P)` where `P` amount of keys with prefix `prefix`
-		/// - `P` storage deletions.
-		/// - Base Weight: 0.834 * P µs
-		/// - Writes: Number of subkeys + 1
-		/// # </weight>
-		#[weight = (
-			T::SystemWeightInfo::kill_prefix(_subkeys.saturating_add(1)),
-			DispatchClass::Operational,
-		)]
-		fn kill_prefix(origin, prefix: Key, _subkeys: u32) {
-			ensure_root(origin)?;
-			storage::unhashed::kill_prefix(&prefix);
-		}
-
-		/// Kill the sending account, assuming there are no references outstanding and the composite
-		/// data is equal to its default value.
-		///
-		/// # <weight>
-		/// - `O(1)`
-		/// - 1 storage read and deletion.
-		/// --------------------
-		/// Base Weight: 8.626 µs
-		/// No DB Read or Write operations because caller is already in overlay
-		/// # </weight>
-		#[weight = (T::SystemWeightInfo::suicide(), DispatchClass::Operational)]
-		pub fn suicide(origin) {
-			let who = ensure_signed(origin)?;
-			let account = Account::<T>::get(&who);
-			ensure!(account.refcount == 0, Error::<T>::NonZeroRefCount);
-			ensure!(account.data == T::AccountData::default(), Error::<T>::NonDefaultComposite);
-			Self::kill_account(&who);
 		}
 	}
 }
@@ -916,7 +985,7 @@ pub enum RefStatus {
 	Unreferenced,
 }
 
-impl<T: Trait> Module<T> {
+impl<T: Config> Pallet<T> {
 	/// Deposits an event into this block's event record.
 	pub fn deposit_event(event: impl Into<T::Event>) {
 		Self::deposit_event_indexed(&[], event.into());
@@ -953,7 +1022,7 @@ impl<T: Trait> Module<T> {
 		// Don't populate events on genesis.
 		if block_number.is_zero() { return }
 
-		let phase = ExecutionPhase::get().unwrap_or_default();
+		let phase = <ExecutionPhase<T>>::get().unwrap_or_default();
 		let event = EventRecord {
 			phase,
 			event,
@@ -962,14 +1031,14 @@ impl<T: Trait> Module<T> {
 
 		// Index of the to be added event.
 		let event_idx = {
-			let old_event_count = EventCount::get();
+			let old_event_count = <EventCount<T>>::get();
 			let new_event_count = match old_event_count.checked_add(1) {
 				// We've reached the maximum number of events at this block, just
 				// don't do anything and leave the event_count unaltered.
 				None => return,
 				Some(nc) => nc,
 			};
-			EventCount::put(new_event_count);
+			<EventCount<T>>::put(new_event_count);
 			old_event_count
 		};
 
@@ -987,11 +1056,11 @@ impl<T: Trait> Module<T> {
 
 	/// Gets extrinsics count.
 	pub fn extrinsic_count() -> u32 {
-		ExtrinsicCount::get().unwrap_or_default()
+		<ExtrinsicCount<T>>::get().unwrap_or_default()
 	}
 
 	pub fn all_extrinsics_len() -> u32 {
-		AllExtrinsicsLen::get().unwrap_or_default()
+		<AllExtrinsicsLen<T>>::get().unwrap_or_default()
 	}
 
 	/// Inform the system module of some additional weight that should be accounted for, in the
@@ -1010,7 +1079,7 @@ impl<T: Trait> Module<T> {
 	///
 	/// Another potential use-case could be for the `on_initialize` and `on_finalize` hooks.
 	pub fn register_extra_weight_unchecked(weight: Weight, class: DispatchClass) {
-		BlockWeight::mutate(|current_weight| {
+		<BlockWeight<T>>::mutate(|current_weight| {
 			current_weight.add(weight, class);
 		});
 	}
@@ -1024,7 +1093,7 @@ impl<T: Trait> Module<T> {
 		kind: InitKind,
 	) {
 		// populate environment
-		ExecutionPhase::put(Phase::Initialization);
+		<ExecutionPhase<T>>::put(Phase::Initialization);
 		storage::unhashed::put(well_known_keys::EXTRINSIC_INDEX, &0u32);
 		<Number<T>>::put(number);
 		<Digest<T>>::put(digest);
@@ -1033,21 +1102,21 @@ impl<T: Trait> Module<T> {
 		<ExtrinsicsRoot<T>>::put(txs_root);
 
 		// Remove previous block data from storage
-		BlockWeight::kill();
+		<BlockWeight<T>>::kill();
 
 		// Kill inspectable storage entries in state when `InitKind::Full`.
 		if let InitKind::Full = kind {
 			<Events<T>>::kill();
-			EventCount::kill();
+			<EventCount<T>>::kill();
 			<EventTopics<T>>::remove_all();
 		}
 	}
 
 	/// Remove temporary "environment" entries in storage.
 	pub fn finalize() -> T::Header {
-		ExecutionPhase::kill();
-		ExtrinsicCount::kill();
-		AllExtrinsicsLen::kill();
+		<ExecutionPhase<T>>::kill();
+		<ExtrinsicCount<T>>::kill();
+		<AllExtrinsicsLen<T>>::kill();
 
 		let number = <Number<T>>::take();
 		let parent_hash = <ParentHash<T>>::take();
@@ -1136,10 +1205,10 @@ impl<T: Trait> Module<T> {
 	/// Set the current block weight. This should only be used in some integration tests.
 	#[cfg(any(feature = "std", test))]
 	pub fn set_block_limits(weight: Weight, len: usize) {
-		BlockWeight::mutate(|current_weight| {
+		<BlockWeight<T>>::mutate(|current_weight| {
 			current_weight.put(weight, DispatchClass::Normal)
 		});
-		AllExtrinsicsLen::put(len as u32);
+		<AllExtrinsicsLen<T>>::put(len as u32);
 	}
 
 	/// Reset events. Can be used as an alternative to
@@ -1147,7 +1216,7 @@ impl<T: Trait> Module<T> {
 	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
 	pub fn reset_events() {
 		<Events<T>>::kill();
-		EventCount::kill();
+		<EventCount<T>>::kill();
 		<EventTopics<T>>::remove_all();
 	}
 
@@ -1171,7 +1240,7 @@ impl<T: Trait> Module<T> {
 	/// NOTE: This function is called only when the block is being constructed locally.
 	/// `execute_block` doesn't note any extrinsics.
 	pub fn note_extrinsic(encoded_xt: Vec<u8>) {
-		ExtrinsicData::insert(Self::extrinsic_index().unwrap_or_default(), encoded_xt);
+		<ExtrinsicData<T>>::insert(Self::extrinsic_index().unwrap_or_default(), encoded_xt);
 	}
 
 	/// To be called immediately after an extrinsic has been applied.
@@ -1179,10 +1248,10 @@ impl<T: Trait> Module<T> {
 		info.weight = extract_actual_weight(r, &info);
 		Self::deposit_event(
 			match r {
-				Ok(_) => RawEvent::ExtrinsicSuccess(info),
+				Ok(_) => Event::ExtrinsicSuccess(info),
 				Err(err) => {
 					sp_runtime::print(err);
-					RawEvent::ExtrinsicFailed(err.error, info)
+					Event::ExtrinsicFailed(err.error, info)
 				},
 			}
 		);
@@ -1190,7 +1259,7 @@ impl<T: Trait> Module<T> {
 		let next_extrinsic_index = Self::extrinsic_index().unwrap_or_default() + 1u32;
 
 		storage::unhashed::put(well_known_keys::EXTRINSIC_INDEX, &next_extrinsic_index);
-		ExecutionPhase::put(Phase::ApplyExtrinsic(next_extrinsic_index));
+		<ExecutionPhase<T>>::put(Phase::ApplyExtrinsic(next_extrinsic_index));
 	}
 
 	/// To be called immediately after `note_applied_extrinsic` of the last extrinsic of the block
@@ -1198,20 +1267,20 @@ impl<T: Trait> Module<T> {
 	pub fn note_finished_extrinsics() {
 		let extrinsic_index: u32 = storage::unhashed::take(well_known_keys::EXTRINSIC_INDEX)
 			.unwrap_or_default();
-		ExtrinsicCount::put(extrinsic_index);
-		ExecutionPhase::put(Phase::Finalization);
+		<ExtrinsicCount<T>>::put(extrinsic_index);
+		<ExecutionPhase<T>>::put(Phase::Finalization);
 	}
 
 	/// To be called immediately after finishing the initialization of the block
 	/// (e.g., called `on_initialize` for all modules).
 	pub fn note_finished_initialize() {
-		ExecutionPhase::put(Phase::ApplyExtrinsic(0))
+		<ExecutionPhase<T>>::put(Phase::ApplyExtrinsic(0))
 	}
 
 	/// Remove all extrinsic data and save the extrinsics trie root.
 	pub fn derive_extrinsics() {
-		let extrinsics = (0..ExtrinsicCount::get().unwrap_or_default())
-			.map(ExtrinsicData::take).collect();
+		let extrinsics = (0..<ExtrinsicCount<T>>::get().unwrap_or_default())
+			.map(<ExtrinsicData<T>>::take).collect();
 		let xts_root = extrinsics_data_root::<T::Hashing>(extrinsics);
 		<ExtrinsicsRoot<T>>::put(xts_root);
 	}
@@ -1219,13 +1288,13 @@ impl<T: Trait> Module<T> {
 	/// An account is being created.
 	pub fn on_created_account(who: T::AccountId) {
 		T::OnNewAccount::on_new_account(&who);
-		Self::deposit_event(RawEvent::NewAccount(who));
+		Self::deposit_event(Event::NewAccount(who));
 	}
 
 	/// Do anything that needs to be done after an account has been killed.
 	fn on_killed_account(who: T::AccountId) {
 		T::OnKilledAccount::on_killed_account(&who);
-		Self::deposit_event(RawEvent::KilledAccount(who));
+		Self::deposit_event(Event::KilledAccount(who));
 	}
 
 	/// Remove an account from storage. This should only be done when its refs are zero or you'll
@@ -1243,7 +1312,7 @@ impl<T: Trait> Module<T> {
 				);
 			}
 		}
-		Module::<T>::on_killed_account(who.clone());
+		Pallet::<T>::on_killed_account(who.clone());
 	}
 
 	/// Determine whether or not it is possible to update the code.
@@ -1271,33 +1340,33 @@ impl<T: Trait> Module<T> {
 
 /// Event handler which calls on_created_account when it happens.
 pub struct CallOnCreatedAccount<T>(PhantomData<T>);
-impl<T: Trait> Happened<T::AccountId> for CallOnCreatedAccount<T> {
+impl<T: Config> Happened<T::AccountId> for CallOnCreatedAccount<T> {
 	fn happened(who: &T::AccountId) {
-		Module::<T>::on_created_account(who.clone());
+		Pallet::<T>::on_created_account(who.clone());
 	}
 }
 
 /// Event handler which calls kill_account when it happens.
 pub struct CallKillAccount<T>(PhantomData<T>);
-impl<T: Trait> Happened<T::AccountId> for CallKillAccount<T> {
+impl<T: Config> Happened<T::AccountId> for CallKillAccount<T> {
 	fn happened(who: &T::AccountId) {
-		Module::<T>::kill_account(who)
+		Pallet::<T>::kill_account(who)
 	}
 }
 
-impl<T: Trait> BlockNumberProvider for Module<T>
+impl<T: Config> BlockNumberProvider for Pallet<T>
 {
 	type BlockNumber = <T as Config>::BlockNumber;
 
 	fn current_block_number() -> Self::BlockNumber {
-		Module::<T>::block_number()
+		Pallet::<T>::block_number()
 	}
 }
 
 // Implement StoredMap for a simple single-item, kill-account-on-remove system. This works fine for
 // storing a single item which is required to not be empty/default for the account to exist.
 // Anything more complex will need more sophisticated logic.
-impl<T: Trait> StoredMap<T::AccountId, T::AccountData> for Module<T> {
+impl<T: Config> StoredMap<T::AccountId, T::AccountData> for Pallet<T> {
 	fn get(k: &T::AccountId) -> T::AccountData {
 		Account::<T>::get(k).data
 	}
@@ -1364,7 +1433,7 @@ pub fn split_inner<T, R, S>(option: Option<T>, splitter: impl FnOnce(T) -> (R, S
 }
 
 
-impl<T: Trait> IsDeadAccount<T::AccountId> for Module<T> {
+impl<T: Config> IsDeadAccount<T::AccountId> for Pallet<T> {
 	fn is_dead_account(who: &T::AccountId) -> bool {
 		!Account::<T>::contains_key(who)
 	}
@@ -1377,7 +1446,7 @@ impl<T> Default for ChainContext<T> {
 	}
 }
 
-impl<T: Trait> Lookup for ChainContext<T> {
+impl<T: Config> Lookup for ChainContext<T> {
 	type Source = <T::Lookup as StaticLookup>::Source;
 	type Target = <T::Lookup as StaticLookup>::Target;
 
