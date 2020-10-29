@@ -716,22 +716,20 @@ fn deposit_event<T: Trait>(
 mod tests {
 	use super::{
 		BalanceOf, Event, ExecResult, ExecutionContext, Ext, Loader,
-		RawEvent, Vm, ReturnFlags, ExecError, ErrorOrigin
+		RawEvent, Vm, ReturnFlags, ExecError, ErrorOrigin, AccountIdOf,
 	};
 	use crate::{
 		gas::GasMeter, tests::{ExtBuilder, Test, MetaEvent},
 		exec::ExecReturnValue, CodeHash, Config,
 		gas::Gas,
-		storage, Error
+		storage::Storage,
+		tests::{ALICE, BOB, CHARLIE},
+		Error,
 	};
 	use crate::tests::test_utils::{place_contract, set_balance, get_balance};
 	use sp_runtime::DispatchError;
 	use assert_matches::assert_matches;
 	use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
-
-	const ALICE: u64 = 1;
-	const BOB: u64 = 2;
-	const CHARLIE: u64 = 3;
 
 	const GAS_LIMIT: Gas = 10_000_000_000;
 
@@ -1066,6 +1064,7 @@ mod tests {
 				&mut GasMeter::<Test>::new(GAS_LIMIT),
 				&input_data_ch,
 				vec![1, 2, 3, 4],
+				0,
 			);
 			assert_matches!(result, Ok(_));
 		});
@@ -1125,8 +1124,8 @@ mod tests {
 
 		let vm = MockVm::new();
 
-		let witnessed_caller_bob = RefCell::new(None::<u64>);
-		let witnessed_caller_charlie = RefCell::new(None::<u64>);
+		let witnessed_caller_bob = RefCell::new(None::<AccountIdOf<Test>>);
+		let witnessed_caller_charlie = RefCell::new(None::<AccountIdOf<Test>>);
 
 		let mut loader = MockLoader::empty();
 		let bob_ch = loader.insert(|ctx| {
@@ -1222,6 +1221,7 @@ mod tests {
 					&mut GasMeter::<Test>::new(GAS_LIMIT),
 					&dummy_ch,
 					vec![],
+					0,
 				),
 				Err(_)
 			);
@@ -1248,13 +1248,14 @@ mod tests {
 					&mut GasMeter::<Test>::new(GAS_LIMIT),
 					&dummy_ch,
 					vec![],
+					0,
 				),
 				Ok((address, ref output)) if output.data == vec![80, 65, 83, 83] => address
 			);
 
 			// Check that the newly created account has the expected code hash and
 			// there are instantiation event.
-			assert_eq!(storage::code_hash::<Test>(&instantiated_contract_address).unwrap(), dummy_ch);
+			assert_eq!(Storage::<Test>::code_hash(&instantiated_contract_address).unwrap(), dummy_ch);
 			assert_eq!(&events(), &[
 				RawEvent::Instantiated(ALICE, instantiated_contract_address)
 			]);
@@ -1281,12 +1282,13 @@ mod tests {
 					&mut GasMeter::<Test>::new(GAS_LIMIT),
 					&dummy_ch,
 					vec![],
+					0,
 				),
 				Ok((address, ref output)) if output.data == vec![70, 65, 73, 76] => address
 			);
 
 			// Check that the account has not been created.
-			assert!(storage::code_hash::<Test>(&instantiated_contract_address).is_err());
+			assert!(Storage::<Test>::code_hash(&instantiated_contract_address).is_err());
 			assert!(events().is_empty());
 		});
 	}
@@ -1297,7 +1299,7 @@ mod tests {
 
 		let mut loader = MockLoader::empty();
 		let dummy_ch = loader.insert(|_| exec_success());
-		let instantiated_contract_address = Rc::new(RefCell::new(None::<u64>));
+		let instantiated_contract_address = Rc::new(RefCell::new(None::<AccountIdOf<Test>>));
 		let instantiator_ch = loader.insert({
 			let dummy_ch = dummy_ch.clone();
 			let instantiated_contract_address = Rc::clone(&instantiated_contract_address);
@@ -1307,7 +1309,8 @@ mod tests {
 					&dummy_ch,
 					Config::<Test>::subsistence_threshold_uncached(),
 					ctx.gas_meter,
-					vec![]
+					vec![],
+					0,
 				).unwrap();
 
 				*instantiated_contract_address.borrow_mut() = address.into();
@@ -1331,7 +1334,7 @@ mod tests {
 
 			// Check that the newly created account has the expected code hash and
 			// there are instantiation event.
-			assert_eq!(storage::code_hash::<Test>(&instantiated_contract_address).unwrap(), dummy_ch);
+			assert_eq!(Storage::<Test>::code_hash(&instantiated_contract_address).unwrap(), dummy_ch);
 			assert_eq!(&events(), &[
 				RawEvent::Instantiated(BOB, instantiated_contract_address)
 			]);
@@ -1355,7 +1358,8 @@ mod tests {
 						&dummy_ch,
 						15u64,
 						ctx.gas_meter,
-						vec![]
+						vec![],
+						0,
 					),
 					Err(ExecError {
 						error: DispatchError::Other("It's a trap!"),
@@ -1410,6 +1414,7 @@ mod tests {
 						&mut GasMeter::<Test>::new(GAS_LIMIT),
 						&terminate_ch,
 						vec![],
+						0,
 					),
 					Err(Error::<Test>::NewContractNotFunded.into())
 				);
@@ -1442,6 +1447,7 @@ mod tests {
 				&mut GasMeter::<Test>::new(GAS_LIMIT),
 				&rent_allowance_ch,
 				vec![],
+				0,
 			);
 			assert_matches!(result, Ok(_));
 		});
